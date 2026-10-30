@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package cloudmarket.order.v1;
+
+option go_package = "cloudmarket/order/v1;orderv1";
+option csharp_namespace = "CloudMarket.Order.V1";
+
+import "google/protobuf/timestamp.proto";
+
+service OrderInternalService {
+  rpc CreateOrder (CreateOrderRequest) returns (OrderResponse);
+  rpc GetOrderStatus (GetOrderStatusRequest) returns (OrderStatusResponse);
+  rpc StreamOrderStatus (StreamOrderStatusRequest) returns (stream OrderStatusUpdateResponse);
+}
+
+enum OrderLifecycleStatus {
+  ORDER_LIFECYCLE_STATUS_UNSPECIFIED = 0;
+  ORDER_LIFECYCLE_STATUS_PENDING = 1;
+  ORDER_LIFECYCLE_STATUS_STOCK_RESERVED = 2;
+  ORDER_LIFECYCLE_STATUS_PAID = 3;
+  ORDER_LIFECYCLE_STATUS_PROCESSING = 4;
+  ORDER_LIFECYCLE_STATUS_SHIPPED = 5;
+  ORDER_LIFECYCLE_STATUS_DELIVERED = 6;
+  ORDER_LIFECYCLE_STATUS_CANCELLED = 7;
+}
+
+message OrderItemPayload {
+  string product_id = 1;
+  int32 quantity = 2;
+  double price_per_unit = 3;
+}
+
+message CreateOrderRequest {
+  string customer_id = 1;
+  string idempotency_key = 2;
+  repeated OrderItemPayload items = 3;
+  string delivery_address = 4;
+}
+
+message OrderResponse {
+  string order_id = 1;
+  OrderLifecycleStatus status = 2;
+  double total_amount = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
+
+message GetOrderStatusRequest {
+  string order_id = 1;
+}
+
+message OrderStatusResponse {
+  string order_id = 1;
+  OrderLifecycleStatus status = 2;
+  string tracking_number = 3;
+  google.protobuf.Timestamp last_updated = 4;
+}
+
+message StreamOrderStatusRequest {
+  string order_id = 1;
+}
+
+message OrderStatusUpdateResponse {
+  string order_id = 1;
+  OrderLifecycleStatus previous_status = 2;
+  OrderLifecycleStatus new_status = 3;
+  string status_message = 4;
+  google.protobuf.Timestamp event_time = 5;
+}
