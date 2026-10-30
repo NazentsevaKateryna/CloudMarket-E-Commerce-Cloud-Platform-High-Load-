@@ -1,0 +1,355 @@
+openapi: 3.0.3
+info:
+  title: CloudMarket Orders & Checkout API
+  description: Публічний REST API для керування замовленнями платформи електронної комерції CloudMarket. Спроєктовано за підходом Contract-First.
+  version: 1.0.0
+  contact:
+    name: Назенцева Катерина
+    email: student@kntu.net.ua
+servers:
+  - url: http://localhost:4010/api/v1
+    description: Prism Mock Server (Local Development)
+  - url: https://api.cloudmarket.internal/v1
+    description: Production Gateway
+
+paths:
+  /orders:
+    get:
+      summary: Отримати список замовлень клієнта
+      description: Повертає пагінований список замовлень авторизованого користувача з можливістю фільтрації за статусом.
+      operationId: getOrders
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Фільтр за поточним статусом замовлення
+          schema:
+            $ref: '#/components/schemas/OrderStatus'
+        - name: page
+          in: query
+          required: false
+          description: Номер сторінки
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          description: Кількість елементів на сторінці
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Список замовлень успішно отримано
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedProblem'
+        '500':
+          $ref: '#/components/responses/InternalServerProblem'
+
+    post:
+      summary: Створити нове замовлення
+      description: Створює нове замовлення з кошика покупця, ініціює резервацію складу та платіжний процес.
+      operationId: createOrder
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Унікальний UUID-ключ ідемпотентності для запобігання подвійному створенню замовлення
+          schema:
+            type: string
+            format: uuid
+            example: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '201':
+          description: Замовлення успішно створено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestProblem'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntityProblem'
+        '500':
+          $ref: '#/components/responses/InternalServerProblem'
+
+  /orders/{orderId}:
+    parameters:
+      - name: orderId
+        in: path
+        required: true
+        description: Унікальний UUID ідентифікатор замовлення
+        schema:
+          type: string
+          format: uuid
+          example: "a8098c1a-f86e-11da-bd1a-00112444be1e"
+
+    get:
+      summary: Отримати деталі замовлення
+      operationId: getOrderById
+      responses:
+        '200':
+          description: Деталі замовлення знайдено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundProblem'
+        '500':
+          $ref: '#/components/responses/InternalServerProblem'
+
+    put:
+      summary: Оновити інформацію про доставку
+      description: Зміна адреси або контактних даних отримувача до моменту передачі на комплектацію.
+      operationId: updateOrderDelivery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDeliveryRequest'
+      responses:
+        '200':
+          description: Дані доставки оновлено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestProblem'
+        '404':
+          $ref: '#/components/responses/NotFoundProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+
+    delete:
+      summary: Скасувати замовлення
+      description: Скасування замовлення клієнтом до моменту початку комплектації.
+      operationId: cancelOrder
+      responses:
+        '204':
+          description: Замовлення успішно скасовано
+        '404':
+          $ref: '#/components/responses/NotFoundProblem'
+        '409':
+          $ref: '#/components/responses/ConflictProblem'
+
+components:
+  schemas:
+    OrderStatus:
+      type: string
+      enum: [DRAFT, PENDING_PAYMENT, PAID, PROCESSING, SHIPPED, DELIVERED, CANCELLED]
+      example: PAID
+
+    OrderItem:
+      type: object
+      required:
+        - productId
+        - quantity
+        - unitPrice
+      properties:
+        productId:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        title:
+          type: string
+          example: "Бездротові навушники Sony WH-1000XM5"
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 50
+          example: 1
+        unitPrice:
+          type: number
+          format: double
+          minimum: 0.01
+          example: 14999.00
+
+    CreateOrderRequest:
+      type: object
+      required:
+        - items
+        - deliveryAddress
+        - paymentMethod
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        deliveryAddress:
+          type: string
+          minLength: 5
+          maxLength: 255
+          example: "м. Київ, вул. Хрещатик, буд. 22, кв. 10"
+        promoCode:
+          type: string
+          pattern: "^[A-Z0-9_-]{3,20}$"
+          example: "BLACKFRIDAY26"
+        paymentMethod:
+          type: string
+          enum: [CARD, APPLE_PAY, GOOGLE_PAY]
+          example: CARD
+
+    UpdateDeliveryRequest:
+      type: object
+      required:
+        - deliveryAddress
+      properties:
+        deliveryAddress:
+          type: string
+          minLength: 5
+          example: "м. Львів, пр. Свободи, буд. 1"
+        recipientPhone:
+          type: string
+          pattern: "^\\+380[0-9]{9}$"
+          example: "+380501234567"
+
+    OrderResponse:
+      type: object
+      required:
+        - orderId
+        - customerId
+        - status
+        - items
+        - totalAmount
+        - createdAt
+      properties:
+        orderId:
+          type: string
+          format: uuid
+          example: "a8098c1a-f86e-11da-bd1a-00112444be1e"
+        customerId:
+          type: string
+          format: uuid
+          example: "bb4411aa-1111-2222-3333-444455556666"
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        totalAmount:
+          type: number
+          format: double
+          example: 14999.00
+        deliveryAddress:
+          type: string
+          example: "м. Київ, вул. Хрещатик, буд. 22, кв. 10"
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-10-30T10:30:00Z"
+
+    OrderListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - page
+        - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderResponse'
+        total:
+          type: integer
+          example: 42
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+
+    ProblemDetails:
+      type: object
+      required:
+        - type
+        - title
+        - status
+        - instance
+      properties:
+        type:
+          type: string
+          format: uri
+          example: "https://api.cloudmarket.internal/errors/bad-request"
+        title:
+          type: string
+          example: "Bad Request"
+        status:
+          type: integer
+          example: 400
+        detail:
+          type: string
+          example: "Параметр 'deliveryAddress' є обов'язковим для заповнення."
+        instance:
+          type: string
+          format: uri
+          example: "/orders/a8098c1a"
+        invalidParams:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                example: "items[0].quantity"
+              reason:
+                type: string
+                example: "Кількість товару повинна бути не менше 1"
+
+  responses:
+    BadRequestProblem:
+      description: RFC 7807 Помилка невалідного запиту
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    UnauthorizedProblem:
+      description: RFC 7807 Помилка автентифікації
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    NotFoundProblem:
+      description: RFC 7807 Ресурс не знайдено
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    ConflictProblem:
+      description: RFC 7807 Конфлікт бізнес-стану сутності
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    UnprocessableEntityProblem:
+      description: RFC 7807 Семантична помилка валідації payload
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    InternalServerProblem:
+      description: RFC 7807 Внутрішня системна помилка сервера
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
